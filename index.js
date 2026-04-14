@@ -19,20 +19,49 @@ client.commands = new Collection();
 client.cooldowns = new Collection();
 client.musicQueues = new Map();
 
-// Support both repo layouts:
-// 1) app root contains src/
-// 2) app root contains crime-bot/src/
-const projectRoot = fs.existsSync(path.join(__dirname, 'src'))
-  ? __dirname
-  : (fs.existsSync(path.join(__dirname, 'crime-bot', 'src')) ? path.join(__dirname, 'crime-bot') : __dirname);
+function findProjectRoot(startDir, maxDepth = 4) {
+  const queue = [{ dir: startDir, depth: 0 }];
+  const visited = new Set();
 
-const commandsRoot = path.join(projectRoot, 'src', 'commands');
-const eventsRoot = path.join(projectRoot, 'src', 'events');
+  while (queue.length > 0) {
+    const { dir, depth } = queue.shift();
+    const realDir = path.resolve(dir);
+    if (visited.has(realDir)) continue;
+    visited.add(realDir);
 
-if (!fs.existsSync(commandsRoot) || !fs.existsSync(eventsRoot)) {
+    const srcDir = path.join(realDir, 'src');
+    if (fs.existsSync(path.join(srcDir, 'commands')) && fs.existsSync(path.join(srcDir, 'events'))) {
+      return realDir;
+    }
+
+    if (depth >= maxDepth) continue;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(realDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      queue.push({ dir: path.join(realDir, entry.name), depth: depth + 1 });
+    }
+  }
+
+  return null;
+}
+
+const projectRoot = findProjectRoot(__dirname);
+
+const commandsRoot = projectRoot ? path.join(projectRoot, 'src', 'commands') : null;
+const eventsRoot = projectRoot ? path.join(projectRoot, 'src', 'events') : null;
+
+if (!projectRoot || !fs.existsSync(commandsRoot) || !fs.existsSync(eventsRoot)) {
   console.error(`Missing command/event folders. Checked:
-  - ${commandsRoot}
-  - ${eventsRoot}
+  - ${path.join(__dirname, 'src', 'commands')}
+  - ${path.join(__dirname, 'src', 'events')}
 Set Railway Root Directory to the folder that contains src/, or flatten the project.`);
   process.exit(1);
 }
