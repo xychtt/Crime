@@ -91,6 +91,13 @@ function ensureQueue(client, guildId, message, voiceChannel) {
   const queue = client.musicQueues.get(guildId);
   queue.textChannelId = message.channel.id;
 
+  const currentChannelId = queue.connection?.joinConfig?.channelId;
+  if (queue.connection && currentChannelId && currentChannelId !== voiceChannel.id) {
+    queue.connection.destroy();
+    queue.connection = null;
+    queue.initialized = false;
+  }
+
   if (!queue.connection) {
     queue.connection = joinVoiceChannel({
       channelId: voiceChannel.id,
@@ -101,7 +108,10 @@ function ensureQueue(client, guildId, message, voiceChannel) {
   }
 
   if (!queue.initialized) {
-    queue.connection.subscribe(queue.player);
+    const sub = queue.connection.subscribe(queue.player);
+    if (!sub) {
+      throw new Error('Failed to subscribe audio player to voice connection.');
+    }
     queue.initialized = true;
   }
 
@@ -232,6 +242,9 @@ async function playNext(queue, message, client, statusMsg = null) {
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     queue.player.play(resource);
     await entersState(queue.player, AudioPlayerStatus.Playing, 15_000);
+
+    // Re-subscribe defensively in case connection changed states.
+    queue.connection.subscribe(queue.player);
 
     const nowPlaying = crimeEmbed({
       title: 'Now Playing',
