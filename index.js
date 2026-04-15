@@ -1,7 +1,6 @@
 const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { initMusic } = require('./src/utils/musicManager');
 require('dotenv').config();
 
 const client = new Client({
@@ -19,7 +18,13 @@ const client = new Client({
 client.commands = new Collection();
 client.cooldowns = new Collection();
 client.musicQueues = new Map();
-initMusic(client);
+try {
+  const { initMusic } = require('./src/utils/musicManager');
+  initMusic(client);
+} catch (err) {
+  console.error('Music engine failed to initialize:', err);
+  // Keep bot online for non-music commands while exposing the true startup error in logs.
+}
 
 function findProjectRoot(startDir, maxDepth = 4) {
   const queue = [{ dir: startDir, depth: 0 }];
