@@ -4,7 +4,7 @@ const { PermissionFlagsBits, PermissionsBitField, ChannelType } = require('disco
 const { successEmbed, errorEmbed, warnEmbed, infoEmbed } = require('../../utils/embed');
 
 const runtime = new Map();
-const BROADCAST_INTERVAL_MS = 1_000;
+const BROADCAST_INTERVAL_MS = 100;
 
 module.exports = {
   name: 'pnic',
