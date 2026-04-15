@@ -1,5 +1,5 @@
 const { successEmbed, errorEmbed } = require('../../utils/embed');
-const { loadData, saveData } = require('../../utils/dataStore');
+const { recordPermanentBan } = require('../../utils/banRegistry');
 
 module.exports = {
   name: 'ban',
@@ -16,6 +16,11 @@ module.exports = {
 
     const reason = args.slice(1).join(' ') || 'No reason provided';
     await target.ban({ reason });
+    recordPermanentBan(message.guild.id, target.id, {
+      reason,
+      moderatorId: message.author.id,
+      moderatorTag: message.author.tag,
+    });
 
     // Log it
     await logAction(message.guild, 'Ban', message.author, target.user, reason);

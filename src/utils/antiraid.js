@@ -1,39 +1,40 @@
 const joinTracker = new Map();
+const { warnEmbed } = require('./embed');
 
 async function handleAntiRaid(member) {
   const enabled = process.env.ANTIRAID_ENABLED === 'true';
-  if (!enabled) return;
+  if (!enabled) return false;
 
-  const threshold = parseInt(process.env.ANTIRAID_JOIN_THRESHOLD) || 10;
-  const window = parseInt(process.env.ANTIRAID_JOIN_WINDOW) || 10000;
+  const threshold = parseInt(process.env.ANTIRAID_JOIN_THRESHOLD || '10', 10);
+  const windowMs = parseInt(process.env.ANTIRAID_JOIN_WINDOW || '10000', 10);
 
   const guildId = member.guild.id;
   const now = Date.now();
 
   const joins = joinTracker.get(guildId) || [];
-  const recent = joins.filter(t => now - t < window);
+  const recent = joins.filter(t => now - t < windowMs);
   recent.push(now);
   joinTracker.set(guildId, recent);
 
-  if (recent.length >= threshold) {
-    // Kick the joining member
-    await member.kick('Anti-raid: mass join detected').catch(() => {});
+  if (recent.length < threshold) return false;
 
-    // Alert in first available text channel
-    const channel = member.guild.channels.cache.find(
-      c => c.isTextBased() && c.permissionsFor(member.guild.members.me).has('SendMessages')
-    );
+  await member.kick('Anti-raid: mass join detected').catch(() => {});
 
-    if (channel) {
-      const { warnEmbed } = require('./embed');
-      channel.send({
-        embeds: [warnEmbed(
-          `⚠️ **Raid detected!** ${recent.length} users joined in ${window / 1000}s. Kicking new joins automatically.\n\nDisable with \`!antiraid off\` or adjust in \`.env\`.`,
-          '🔒 Anti-Raid Triggered'
-        )],
-      });
-    }
+  const channel = member.guild.channels.cache.find(
+    c => c.isTextBased() && c.permissionsFor(member.guild.members.me).has('SendMessages')
+  );
+
+  if (channel) {
+    await channel.send({
+      embeds: [warnEmbed(
+        `Raid detected: ${recent.length} users joined in ${windowMs / 1000}s. Kicking new joins automatically.`,
+        'Anti-Raid Triggered'
+      )],
+    }).catch(() => {});
   }
+
+  return true;
 }
 
 module.exports = { handleAntiRaid };
+

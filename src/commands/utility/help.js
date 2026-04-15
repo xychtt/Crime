@@ -40,6 +40,8 @@ const categories = {
       { name: 'announce', desc: 'Send an announcement to a channel' },
       { name: 'remind', desc: 'Set a personal reminder' },
       { name: 'userinfo', desc: 'Get info about a user' },
+      { name: 'trust', desc: 'Trust/background check for a member' },
+      { name: 'maincheck', desc: 'Find likely main account matches' },
       { name: 'serverinfo', desc: 'Get info about the server' },
       { name: 'ticket', desc: 'Open a support ticket' },
       { name: 'closeticket', desc: 'Close and archive a ticket' },

@@ -1,11 +1,17 @@
 const { handleAntiRaid } = require('../utils/antiraid');
+const { handleJoinSecurity } = require('../utils/joinSecurity');
 const { crimeEmbed } = require('../utils/embed');
 
 module.exports = {
   name: 'guildMemberAdd',
   async execute(member, client) {
     // Anti-raid check
-    await handleAntiRaid(member);
+    const antiRaidBlocked = await handleAntiRaid(member);
+    if (antiRaidBlocked) return;
+
+    // Security checks (permanent bans, anti-alt, optional VPN check)
+    const securityBlocked = await handleJoinSecurity(member);
+    if (securityBlocked) return;
 
     // Welcome message
     const channelName = process.env.WELCOME_CHANNEL || 'welcome';
