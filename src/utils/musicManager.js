@@ -5,6 +5,7 @@ const ffmpegPath = require('ffmpeg-static');
 const { crimeEmbed, errorEmbed } = require('./embed');
 
 function initMusic(client) {
+  if (client.distube) return client.distube;
   if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
 
   client.distube = new DisTube(client, {
@@ -67,7 +68,8 @@ function initMusic(client) {
     .on('finish', (queue) => {
       queue.textChannel?.send({ embeds: [crimeEmbed({ description: 'Queue finished.' })] }).catch(() => {});
     });
+
+  return client.distube;
 }
 
 module.exports = { initMusic };
-

@@ -1,4 +1,5 @@
 const { crimeEmbed, errorEmbed } = require('../../utils/embed');
+const { initMusic } = require('../../utils/musicManager');
 
 module.exports = {
   name: 'play',
@@ -29,6 +30,21 @@ module.exports = {
     });
 
     try {
+      if (!client.distube) {
+        try {
+          initMusic(client);
+          client.musicInitError = null;
+        } catch (initErr) {
+          client.musicInitError = initErr?.message || String(initErr);
+        }
+      }
+
+      if (!client.distube) {
+        return searching.edit({
+          embeds: [errorEmbed(`Music engine is unavailable. ${client.musicInitError || 'Initialization failed.'}`)],
+        }).catch(() => {});
+      }
+
       await client.distube.play(voiceChannel, query, {
         textChannel: message.channel,
         member: message.member,
@@ -43,4 +59,3 @@ module.exports = {
     }
   },
 };
-

@@ -21,7 +21,9 @@ client.musicQueues = new Map();
 try {
   const { initMusic } = require('./src/utils/musicManager');
   initMusic(client);
+  client.musicInitError = null;
 } catch (err) {
+  client.musicInitError = err?.message || String(err);
   console.error('Music engine failed to initialize:', err);
   // Keep bot online for non-music commands while exposing the true startup error in logs.
 }

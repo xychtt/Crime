@@ -1,6 +1,16 @@
 const { successEmbed, errorEmbed, crimeEmbed } = require('../../utils/embed');
+const { initMusic } = require('../../utils/musicManager');
 
 function getQueue(client, message) {
+  if (!client.distube) {
+    try {
+      initMusic(client);
+      client.musicInitError = null;
+    } catch (err) {
+      client.musicInitError = err?.message || String(err);
+      return null;
+    }
+  }
   return client.distube.getQueue(message);
 }
 
@@ -11,6 +21,7 @@ const skip = {
   usage: '!skip',
   category: 'music',
   async execute(message, args, client) {
+    if (!client.distube) return message.reply({ embeds: [errorEmbed(`Music engine unavailable. ${client.musicInitError || ''}`)] });
     const queue = getQueue(client, message);
     if (!queue) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
 
@@ -29,6 +40,7 @@ const stop = {
   usage: '!stop',
   category: 'music',
   async execute(message, args, client) {
+    if (!client.distube) return message.reply({ embeds: [errorEmbed(`Music engine unavailable. ${client.musicInitError || ''}`)] });
     const queue = getQueue(client, message);
     if (!queue) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
 
@@ -48,6 +60,7 @@ const queue = {
   usage: '!queue',
   category: 'music',
   async execute(message, args, client) {
+    if (!client.distube) return message.reply({ embeds: [errorEmbed(`Music engine unavailable. ${client.musicInitError || ''}`)] });
     const q = getQueue(client, message);
     if (!q || !q.songs?.length) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
 
@@ -76,6 +89,7 @@ const nowplaying = {
   usage: '!nowplaying',
   category: 'music',
   async execute(message, args, client) {
+    if (!client.distube) return message.reply({ embeds: [errorEmbed(`Music engine unavailable. ${client.musicInitError || ''}`)] });
     const q = getQueue(client, message);
     const song = q?.songs?.[0];
     if (!song) return message.reply({ embeds: [errorEmbed('Nothing is playing right now.')] });
@@ -100,6 +114,7 @@ const pause = {
   usage: '!pause',
   category: 'music',
   async execute(message, args, client) {
+    if (!client.distube) return message.reply({ embeds: [errorEmbed(`Music engine unavailable. ${client.musicInitError || ''}`)] });
     const q = getQueue(client, message);
     if (!q) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
     if (q.paused) return message.reply({ embeds: [errorEmbed('Already paused.')] });
@@ -119,6 +134,7 @@ const resume = {
   usage: '!resume',
   category: 'music',
   async execute(message, args, client) {
+    if (!client.distube) return message.reply({ embeds: [errorEmbed(`Music engine unavailable. ${client.musicInitError || ''}`)] });
     const q = getQueue(client, message);
     if (!q) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
     if (!q.paused) return message.reply({ embeds: [errorEmbed('Playback is not paused.')] });
@@ -133,4 +149,3 @@ const resume = {
 };
 
 module.exports = { skip, stop, queue, nowplaying, pause, resume };
-
