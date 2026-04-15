@@ -8,9 +8,14 @@ const {
   entersState,
 } = require('@discordjs/voice');
 const play = require('play-dl');
+const ffmpegPath = require('ffmpeg-static');
 const { crimeEmbed, errorEmbed } = require('../../utils/embed');
 const LOOKUP_TIMEOUT_MS = 12000;
 const STREAM_TIMEOUT_MS = 20000;
+
+if (ffmpegPath) {
+  process.env.FFMPEG_PATH = ffmpegPath;
+}
 
 module.exports = {
   name: 'play',
@@ -204,6 +209,9 @@ async function playNext(queue, message, client, statusMsg = null) {
   const track = queue.queue.shift();
 
   try {
+    if (statusMsg) {
+      await statusMsg.edit({ embeds: [crimeEmbed({ description: 'Joining voice channel...' })] }).catch(() => {});
+    }
     await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
     queue.connection.subscribe(queue.player);
   } catch (err) {
@@ -215,6 +223,9 @@ async function playNext(queue, message, client, statusMsg = null) {
   }
 
   try {
+    if (statusMsg) {
+      await statusMsg.edit({ embeds: [crimeEmbed({ description: 'Connected. Preparing audio stream...' })] }).catch(() => {});
+    }
     const me = message.guild.members.me;
     if (me?.voice?.channel?.isStageChannel?.() && me.voice.suppress) {
       await me.voice.setSuppressed(false).catch(() => {});
@@ -226,6 +237,9 @@ async function playNext(queue, message, client, statusMsg = null) {
       STREAM_TIMEOUT_MS,
       'Audio stream timed out'
     );
+    if (statusMsg) {
+      await statusMsg.edit({ embeds: [crimeEmbed({ description: 'Stream ready. Starting playback...' })] }).catch(() => {});
+    }
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     queue.player.play(resource);
     await entersState(queue.player, AudioPlayerStatus.Playing, 15_000);
