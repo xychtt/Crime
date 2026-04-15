@@ -20,10 +20,11 @@ module.exports = {
   async execute(message, args, client) {
     if (!args.length) return message.reply({ embeds: [errorEmbed('Please provide a song name or URL.')] });
 
+    const botMember = message.guild.members.me || await message.guild.members.fetchMe().catch(() => null);
     const voiceChannel = message.member.voice.channel;
     if (!voiceChannel) return message.reply({ embeds: [errorEmbed('You need to be in a voice channel.')] });
 
-    const permissions = voiceChannel.permissionsFor(message.guild.members.me);
+    const permissions = botMember ? voiceChannel.permissionsFor(botMember) : null;
     if (!permissions?.has('Connect') || !permissions?.has('Speak')) {
       return message.reply({ embeds: [errorEmbed("I don't have permission to join/speak in your voice channel.")] });
     }
@@ -184,8 +185,7 @@ async function playNext(queue, message, client, statusMsg = null) {
 
   try {
     await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
-    const sub = queue.connection.subscribe(queue.player);
-    if (!sub) throw new Error('Could not subscribe audio player to voice connection.');
+    queue.connection.subscribe(queue.player);
   } catch (err) {
     queue.connection?.destroy();
     queue.playing = false;
@@ -236,4 +236,3 @@ async function playNext(queue, message, client, statusMsg = null) {
 }
 
 module.exports.playNext = playNext;
-
