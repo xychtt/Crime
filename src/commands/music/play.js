@@ -12,8 +12,8 @@ const { crimeEmbed, errorEmbed } = require('../../utils/embed');
 module.exports = {
   name: 'play',
   aliases: ['p'],
-  description: 'Play a song from YouTube',
-  usage: '!play <song name or URL>',
+  description: 'Play a song from YouTube or Spotify links',
+  usage: '!play <YouTube/Spotify URL or search query>',
   category: 'music',
   cooldown: 3,
   async execute(message, args, client) {
@@ -106,22 +106,91 @@ function ensureQueue(client, guildId, message, voiceChannel) {
 }
 
 async function resolveTrack(query, requestedBy) {
-  let source;
-  if (play.yt_validate(query) === 'video') {
-    source = query;
-  } else {
-    const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
-    if (!results?.length) return null;
-    source = results[0].url;
+  // Spotify links are resolved to an equivalent YouTube audio source.
+  if (isSpotifyUrl(query)) {
+    return resolveSpotifyTrack(query, requestedBy);
   }
 
-  const info = await play.video_info(source);
+  const ytSource = await resolveYouTubeSource(query);
+  if (!ytSource) return null;
+
+  const info = await play.video_info(ytSource);
   const details = info.video_details;
   return {
-    url: source,
+    url: ytSource,
+    playbackUrl: ytSource,
     title: details?.title || 'Unknown title',
     duration: details?.durationRaw || 'Unknown',
     thumbnail: details?.thumbnails?.[0]?.url,
+    source: 'YouTube',
+    requestedBy,
+  };
+}
+
+function isSpotifyUrl(query) {
+  return /(?:https?:\/\/)?(?:open\.)?spotify\.com\/(track|album|playlist)\//i.test(query);
+}
+
+async function resolveYouTubeSource(query) {
+  if (play.yt_validate(query) === 'video') return query;
+  const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+  if (!results?.length) return null;
+  return results[0].url;
+}
+
+async function resolveSpotifyTrack(spotifyUrl, requestedBy) {
+  let searchText = null;
+
+  // Try play-dl Spotify metadata first.
+  try {
+    const spType = play.sp_validate(spotifyUrl);
+    const sp = await play.spotify(spotifyUrl);
+    if (sp?.fetch) await sp.fetch();
+
+    if (spType === 'track') {
+      const artist = sp?.artists?.[0]?.name || '';
+      searchText = `${sp.name || ''} ${artist}`.trim();
+    } else if ((spType === 'playlist' || spType === 'album') && sp?.all_tracks) {
+      const tracks = await sp.all_tracks();
+      const first = tracks?.[0];
+      if (first) {
+        const artist = first?.artists?.[0]?.name || '';
+        searchText = `${first.name || ''} ${artist}`.trim();
+      }
+    }
+  } catch {
+    // Fall through to oEmbed fallback
+  }
+
+  // Fallback: Spotify oEmbed (no auth), useful if play-dl Spotify metadata fails.
+  if (!searchText) {
+    try {
+      const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
+      const res = await fetch(oembedUrl);
+      if (res.ok) {
+        const data = await res.json();
+        searchText = `${data?.title || ''} ${data?.author_name || ''}`.trim();
+      }
+    } catch {
+      // ignored
+    }
+  }
+
+  if (!searchText) return null;
+
+  const ytSource = await resolveYouTubeSource(`${searchText} official audio`);
+  if (!ytSource) return null;
+
+  const info = await play.video_info(ytSource);
+  const details = info.video_details;
+
+  return {
+    url: spotifyUrl,
+    playbackUrl: ytSource,
+    title: details?.title || searchText,
+    duration: details?.durationRaw || 'Unknown',
+    thumbnail: details?.thumbnails?.[0]?.url,
+    source: 'Spotify -> YouTube',
     requestedBy,
   };
 }
@@ -148,7 +217,8 @@ async function playNext(queue, message, client, statusMsg = null) {
   }
 
   try {
-    const stream = await play.stream(track.url, { discordPlayerCompatibility: true });
+    const streamUrl = track.playbackUrl || track.url;
+    const stream = await play.stream(streamUrl, { discordPlayerCompatibility: true });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     queue.player.play(resource);
 
@@ -158,6 +228,7 @@ async function playNext(queue, message, client, statusMsg = null) {
       thumbnail: track.thumbnail,
       fields: [
         { name: 'Duration', value: track.duration, inline: true },
+        { name: 'Source', value: track.source || 'YouTube', inline: true },
         { name: 'Requested by', value: track.requestedBy, inline: true },
       ],
     });
@@ -182,4 +253,3 @@ async function playNext(queue, message, client, statusMsg = null) {
 }
 
 module.exports.playNext = playNext;
-
