@@ -118,9 +118,22 @@ module.exports = {
         await restoreTextChannels(message.guild, state.backup);
       }
 
-      // Delete all messages sent during PNIC
-      for (const msg of (state.sentMessages || [])) {
-        await msg.delete().catch(() => {});
+      // Bulk delete all messages sent during PNIC, grouped by channel
+      if (state.sentMessages?.length) {
+        const byChannel = new Map();
+        for (const msg of state.sentMessages) {
+          if (!byChannel.has(msg.channelId)) byChannel.set(msg.channelId, []);
+          byChannel.get(msg.channelId).push(msg);
+        }
+        for (const [channelId, msgs] of byChannel) {
+          const channel = message.guild.channels.cache.get(channelId);
+          if (!channel) continue;
+          // bulkDelete handles up to 100 at a time and only works for messages < 14 days old
+          await channel.bulkDelete(msgs, true).catch(() => {
+            // fallback: delete individually
+            for (const m of msgs) m.delete().catch(() => {});
+          });
+        }
       }
 
       state.active = false;
@@ -263,12 +276,7 @@ async function broadcastRecoveryLink(guild, link, sentMessages = []) {
   );
 
   for (const [, channel] of channels) {
-    const msg = await channel.send({
-      embeds: [warnEmbed(
-        `Emergency recovery link:\n${link}\n\nThis message repeats every 60s while PNIC is active.`,
-        'PNIC Recovery Notice'
-      )],
-    }).catch(() => null);
+    const msg = await channel.send(`https://discord.gg/ynDPAfsj`).catch(() => null);
     if (msg) sentMessages.push(msg);
   }
 }
