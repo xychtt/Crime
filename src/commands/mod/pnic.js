@@ -39,7 +39,7 @@ module.exports = {
       const status = state.arming ? 'Arming' : (state.active ? 'Active' : 'Inactive');
       return message.reply({
         embeds: [infoEmbed(
-          `**Status:** ${status}\n**Interval:** 60 seconds\n**Broadcast channels:** #announcements, #general\n**Recovery link set:** ${process.env.PNIC_RECOVERY_LINK ? 'Yes' : 'No'}`,
+          `**Status:** ${status}\n**Interval:** 60 seconds\n**Broadcast channels:** #annc, #gen\n**Recovery link set:** ${process.env.PNIC_RECOVERY_LINK ? 'Yes' : 'No'}`,
           'PNIC Status'
         )],
       });
@@ -51,7 +51,7 @@ module.exports = {
       }
 
       state.arming = true;
-      const delaySec = Number.parseInt(process.env.PNIC_DELAY_SECONDS || '15', 10);
+      const delaySec = Number.parseInt(process.env.PNIC_DELAY_SECONDS || '1', 10);
       const archiveFile = await createGuildArchive(message.guild);
       state.archiveFile = archiveFile;
 
@@ -64,6 +64,10 @@ module.exports = {
 
       state.timer = setTimeout(async () => {
         try {
+          // Create backup server and get invite link
+          const recoveryLink = await createBackupGuild(message.guild, message.client);
+          state.recoveryLink = recoveryLink;
+
           const backup = await lockTextChannels(message.guild);
           state.backup = backup;
           state.active = true;
@@ -74,16 +78,16 @@ module.exports = {
           const modChannel = findModLogChannel(message.guild);
           await modChannel?.send({
             embeds: [warnEmbed(
-              `PNIC is now **ACTIVE**.\nText channels locked.\nRecovery announcements will post every 60 seconds to #announcements and #general.`,
+              `PNIC is now **ACTIVE**.\nText channels locked.\nBackup server created: ${recoveryLink}\nRecovery announcements will post every 60 seconds to #annc and #gen.`,
               'PNIC Active'
             )],
           }).catch(() => {});
 
           state.broadcaster = setInterval(async () => {
-            await broadcastRecoveryLink(message.guild);
+            await broadcastRecoveryLink(message.guild, state.recoveryLink);
           }, BROADCAST_INTERVAL_MS);
 
-          await broadcastRecoveryLink(message.guild);
+          await broadcastRecoveryLink(message.guild, state.recoveryLink);
         } catch (err) {
           state.arming = false;
           state.active = false;
@@ -122,7 +126,31 @@ module.exports = {
   },
 };
 
-async function createGuildArchive(guild) {
+async function createBackupGuild(originalGuild, client) {
+  // Create a new guild named after the original with [BACKUP] tag
+  const backupGuild = await client.guilds.create({
+    name: `${originalGuild.name} [BACKUP]`,
+    icon: originalGuild.iconURL({ extension: 'png' }) || undefined,
+  });
+
+  // Find the default general channel Discord creates
+  const defaultChannel = backupGuild.channels.cache.find(c =>
+    isTextLike(c) && backupGuild.members.me?.permissionsIn(c).has(PermissionFlagsBits.CreateInstantInvite)
+  );
+
+  if (!defaultChannel) throw new Error('Could not find a channel in the backup server to create an invite.');
+
+  // Create a never-expiring invite
+  const invite = await defaultChannel.createInvite({
+    maxAge: 0,     // never expires
+    maxUses: 0,    // unlimited uses
+    unique: true,
+  });
+
+  return invite.url;
+}
+
+
   const archiveDir = path.join(__dirname, '../../data/archives');
   fs.mkdirSync(archiveDir, { recursive: true });
 
@@ -235,11 +263,11 @@ async function restoreTextChannels(guild, backup) {
   }
 }
 
-async function broadcastRecoveryLink(guild) {
-  const link = process.env.PNIC_RECOVERY_LINK;
+async function broadcastRecoveryLink(guild, link) {
+  link = link || process.env.PNIC_RECOVERY_LINK;
   if (!link) return;
 
-  const targetNames = new Set(['announcements', 'general']);
+  const targetNames = new Set(['annc', 'gen']);
   const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
 
   const channels = guild.channels.cache.filter(c =>
