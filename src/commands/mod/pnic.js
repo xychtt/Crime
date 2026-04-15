@@ -30,6 +30,7 @@ module.exports = {
         activatedBy: null,
         activatedAt: null,
         archiveFile: null,
+        sentMessages: [],
       });
     }
 
@@ -76,18 +77,19 @@ module.exports = {
           state.activatedAt = new Date().toISOString();
 
           const modChannel = findModLogChannel(message.guild);
-          await modChannel?.send({
+          const modMsg = await modChannel?.send({
             embeds: [warnEmbed(
               `PNIC is now **ACTIVE**.\nText channels locked.\nBackup server created: ${recoveryLink}\nRecovery announcements will post every 60 seconds to #annc and #gen.`,
               'PNIC Active'
             )],
-          }).catch(() => {});
+          }).catch(() => null);
+          if (modMsg) state.sentMessages.push(modMsg);
 
           state.broadcaster = setInterval(async () => {
-            await broadcastRecoveryLink(message.guild, state.recoveryLink);
+            await broadcastRecoveryLink(message.guild, state.recoveryLink, state.sentMessages);
           }, BROADCAST_INTERVAL_MS);
 
-          await broadcastRecoveryLink(message.guild, state.recoveryLink);
+          await broadcastRecoveryLink(message.guild, state.recoveryLink, state.sentMessages);
         } catch (err) {
           state.arming = false;
           state.active = false;
@@ -115,9 +117,15 @@ module.exports = {
         await restoreTextChannels(message.guild, state.backup);
       }
 
+      // Delete all messages sent during PNIC
+      for (const msg of (state.sentMessages || [])) {
+        await msg.delete().catch(() => {});
+      }
+
       state.active = false;
       state.arming = false;
       state.backup = {};
+      state.sentMessages = [];
 
       return message.reply({ embeds: [successEmbed('PNIC stopped. Channel permissions restored.')] });
     }
@@ -151,6 +159,7 @@ async function createBackupGuild(originalGuild, client) {
 }
 
 
+async function createGuildArchive(guild) {
   const archiveDir = path.join(__dirname, '../../data/archives');
   fs.mkdirSync(archiveDir, { recursive: true });
 
@@ -263,7 +272,7 @@ async function restoreTextChannels(guild, backup) {
   }
 }
 
-async function broadcastRecoveryLink(guild, link) {
+async function broadcastRecoveryLink(guild, link, sentMessages = []) {
   link = link || process.env.PNIC_RECOVERY_LINK;
   if (!link) return;
 
@@ -277,12 +286,13 @@ async function broadcastRecoveryLink(guild, link) {
   );
 
   for (const [, channel] of channels) {
-    await channel.send({
+    const msg = await channel.send({
       embeds: [warnEmbed(
         `Emergency recovery link:\n${link}\n\nThis message repeats every 60s while PNIC is active.`,
         'PNIC Recovery Notice'
       )],
-    }).catch(() => {});
+    }).catch(() => null);
+    if (msg) sentMessages.push(msg);
   }
 }
 
