@@ -4,6 +4,7 @@ const {
   createAudioResource,
   AudioPlayerStatus,
   VoiceConnectionStatus,
+  NoSubscriberBehavior,
   entersState,
 } = require('@discordjs/voice');
 const play = require('play-dl');
@@ -77,7 +78,9 @@ function ensureQueue(client, guildId, message, voiceChannel) {
   if (!client.musicQueues.has(guildId)) {
     client.musicQueues.set(guildId, {
       connection: null,
-      player: createAudioPlayer(),
+      player: createAudioPlayer({
+        behaviors: { noSubscriber: NoSubscriberBehavior.Play },
+      }),
       queue: [],
       playing: false,
       textChannelId: message.channel.id,
@@ -217,10 +220,18 @@ async function playNext(queue, message, client, statusMsg = null) {
   }
 
   try {
+    // Stage channels can keep bots suppressed, causing "playing" but no audible output.
+    const me = message.guild.members.me;
+    if (me?.voice?.channel?.isStageChannel?.() && me.voice.suppress) {
+      await me.voice.setSuppressed(false).catch(() => {});
+      await me.voice.setRequestToSpeak(true).catch(() => {});
+    }
+
     const streamUrl = track.playbackUrl || track.url;
     const stream = await play.stream(streamUrl, { discordPlayerCompatibility: true });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     queue.player.play(resource);
+    await entersState(queue.player, AudioPlayerStatus.Playing, 15_000);
 
     const nowPlaying = crimeEmbed({
       title: 'Now Playing',
@@ -241,12 +252,15 @@ async function playNext(queue, message, client, statusMsg = null) {
     });
     queue.player.once('error', (err) => {
       console.error('Player error:', err);
+      message.channel.send({
+        embeds: [errorEmbed(`Player error on **${track.title}**: ${err?.message || 'Unknown error'}`)],
+      }).catch(() => {});
       playNext(queue, message, client).catch(nextErr => console.error('playNext recover error:', nextErr));
     });
   } catch (err) {
     console.error('Track playback error:', err);
     await message.channel.send({
-      embeds: [errorEmbed(`Failed to play **${track.title}**. Skipping...`)],
+      embeds: [errorEmbed(`Failed to play **${track.title}**. ${err?.message || 'Unknown error'} Skipping...`)],
     }).catch(() => {});
     await playNext(queue, message, client);
   }
