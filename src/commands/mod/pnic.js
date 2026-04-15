@@ -4,7 +4,7 @@ const { PermissionFlagsBits, PermissionsBitField, ChannelType } = require('disco
 const { successEmbed, errorEmbed, warnEmbed, infoEmbed } = require('../../utils/embed');
 
 const runtime = new Map();
-const BROADCAST_INTERVAL_MS = 60_000;
+const BROADCAST_INTERVAL_MS = 1_000;
 
 module.exports = {
   name: 'pnic',
@@ -65,8 +65,9 @@ module.exports = {
 
       state.timer = setTimeout(async () => {
         try {
-          // Create backup server and get invite link
-          const recoveryLink = await createBackupGuild(message.guild, message.client);
+          // Use pre-configured recovery link (Discord blocks bots from creating guilds)
+          const recoveryLink = process.env.PNIC_RECOVERY_LINK || 'https://discord.gg/ynDPAfsj';
+          if (!recoveryLink) throw new Error('PNIC_RECOVERY_LINK is not set in environment variables. Create a backup server manually and set the invite link.');
           state.recoveryLink = recoveryLink;
 
           const backup = await lockTextChannels(message.guild);
@@ -133,30 +134,6 @@ module.exports = {
     return message.reply({ embeds: [errorEmbed('Usage: `!pnic <start|stop|status>`')] });
   },
 };
-
-async function createBackupGuild(originalGuild, client) {
-  // Create a new guild named after the original with [BACKUP] tag
-  const backupGuild = await client.guilds.create({
-    name: `${originalGuild.name} [BACKUP]`,
-    icon: originalGuild.iconURL({ extension: 'png' }) || undefined,
-  });
-
-  // Find the default general channel Discord creates
-  const defaultChannel = backupGuild.channels.cache.find(c =>
-    isTextLike(c) && backupGuild.members.me?.permissionsIn(c).has(PermissionFlagsBits.CreateInstantInvite)
-  );
-
-  if (!defaultChannel) throw new Error('Could not find a channel in the backup server to create an invite.');
-
-  // Create a never-expiring invite
-  const invite = await defaultChannel.createInvite({
-    maxAge: 0,     // never expires
-    maxUses: 0,    // unlimited uses
-    unique: true,
-  });
-
-  return invite.url;
-}
 
 
 async function createGuildArchive(guild) {
