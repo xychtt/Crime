@@ -1,8 +1,7 @@
 const { successEmbed, errorEmbed, crimeEmbed } = require('../../utils/embed');
-const { AudioPlayerStatus } = require('@discordjs/voice');
 
-function getQueue(client, guildId) {
-  return client.musicQueues.get(guildId);
+function getQueue(client, message) {
+  return client.distube.getQueue(message);
 }
 
 const skip = {
@@ -12,12 +11,15 @@ const skip = {
   usage: '!skip',
   category: 'music',
   async execute(message, args, client) {
-    const queue = getQueue(client, message.guild.id);
-    if (!queue || !queue.playing)
-      return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
+    const queue = getQueue(client, message);
+    if (!queue) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
 
-    queue.player.stop();
-    message.reply({ embeds: [successEmbed('⏭️ Skipped the current track.')] });
+    try {
+      await client.distube.skip(message);
+      return message.reply({ embeds: [successEmbed('Skipped the current track.')] });
+    } catch (err) {
+      return message.reply({ embeds: [errorEmbed(err?.message || 'Could not skip this track.')] });
+    }
   },
 };
 
@@ -27,16 +29,15 @@ const stop = {
   usage: '!stop',
   category: 'music',
   async execute(message, args, client) {
-    const queue = getQueue(client, message.guild.id);
-    if (!queue || !queue.playing)
-      return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
+    const queue = getQueue(client, message);
+    if (!queue) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
 
-    queue.queue = [];
-    queue.player.stop();
-    queue.connection?.destroy();
-    client.musicQueues.delete(message.guild.id);
-
-    message.reply({ embeds: [successEmbed('⏹️ Stopped and cleared the queue.')] });
+    try {
+      await client.distube.stop(message);
+      return message.reply({ embeds: [successEmbed('Stopped and cleared the queue.')] });
+    } catch (err) {
+      return message.reply({ embeds: [errorEmbed(err?.message || 'Could not stop playback.')] });
+    }
   },
 };
 
@@ -47,31 +48,49 @@ const queue = {
   usage: '!queue',
   category: 'music',
   async execute(message, args, client) {
-    const q = getQueue(client, message.guild.id);
-    if (!q || !q.playing)
-      return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
+    const q = getQueue(client, message);
+    if (!q || !q.songs?.length) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
 
-    const list = q.queue.slice(0, 10).map((t, i) => `**${i + 1}.** ${t.title} — *${t.duration}*`).join('\n');
+    const now = q.songs[0];
+    const upcoming = q.songs
+      .slice(1, 11)
+      .map((song, i) => `**${i + 1}.** ${song.name} - *${song.formattedDuration || 'Unknown'}*`)
+      .join('\n');
 
-    message.reply({ embeds: [crimeEmbed({
-      title: `🎶 Queue (${q.queue.length} tracks)`,
-      description: list || 'Queue is empty — current track is the last one.',
-    })] });
+    return message.reply({
+      embeds: [crimeEmbed({
+        title: `Queue (${q.songs.length - 1} upcoming)`,
+        fields: [
+          { name: 'Now Playing', value: `[${now.name}](${now.url})` },
+          { name: 'Up Next', value: upcoming || 'No upcoming tracks.' },
+        ],
+      })],
+    });
   },
 };
 
 const nowplaying = {
   name: 'nowplaying',
   aliases: ['np'],
-  description: 'See what\'s currently playing',
+  description: 'See what is currently playing',
   usage: '!nowplaying',
   category: 'music',
   async execute(message, args, client) {
-    const q = getQueue(client, message.guild.id);
-    if (!q || !q.playing)
-      return message.reply({ embeds: [errorEmbed('Nothing is playing right now.')] });
+    const q = getQueue(client, message);
+    const song = q?.songs?.[0];
+    if (!song) return message.reply({ embeds: [errorEmbed('Nothing is playing right now.')] });
 
-    message.reply({ embeds: [crimeEmbed({ description: '🎵 Use `!queue` to see the full list of upcoming tracks.' })] });
+    return message.reply({
+      embeds: [crimeEmbed({
+        title: 'Now Playing',
+        description: `**[${song.name}](${song.url})**`,
+        fields: [
+          { name: 'Duration', value: song.formattedDuration || 'Unknown', inline: true },
+          { name: 'Requested by', value: song.user?.tag || 'Unknown', inline: true },
+        ],
+        thumbnail: song.thumbnail,
+      })],
+    });
   },
 };
 
@@ -81,13 +100,16 @@ const pause = {
   usage: '!pause',
   category: 'music',
   async execute(message, args, client) {
-    const q = getQueue(client, message.guild.id);
-    if (!q || !q.playing) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
-    if (q.player.state.status === AudioPlayerStatus.Paused)
-      return message.reply({ embeds: [errorEmbed('Already paused. Use `!resume` to continue.')] });
+    const q = getQueue(client, message);
+    if (!q) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
+    if (q.paused) return message.reply({ embeds: [errorEmbed('Already paused.')] });
 
-    q.player.pause();
-    message.reply({ embeds: [successEmbed('⏸️ Paused.')] });
+    try {
+      await client.distube.pause(message);
+      return message.reply({ embeds: [successEmbed('Paused playback.')] });
+    } catch (err) {
+      return message.reply({ embeds: [errorEmbed(err?.message || 'Could not pause playback.')] });
+    }
   },
 };
 
@@ -97,14 +119,18 @@ const resume = {
   usage: '!resume',
   category: 'music',
   async execute(message, args, client) {
-    const q = getQueue(client, message.guild.id);
-    if (!q) return message.reply({ embeds: [errorEmbed('Nothing is paused.')] });
-    if (q.player.state.status !== AudioPlayerStatus.Paused)
-      return message.reply({ embeds: [errorEmbed('Not paused.')] });
+    const q = getQueue(client, message);
+    if (!q) return message.reply({ embeds: [errorEmbed('Nothing is playing.')] });
+    if (!q.paused) return message.reply({ embeds: [errorEmbed('Playback is not paused.')] });
 
-    q.player.unpause();
-    message.reply({ embeds: [successEmbed('▶️ Resumed.')] });
+    try {
+      await client.distube.resume(message);
+      return message.reply({ embeds: [successEmbed('Resumed playback.')] });
+    } catch (err) {
+      return message.reply({ embeds: [errorEmbed(err?.message || 'Could not resume playback.')] });
+    }
   },
 };
 
 module.exports = { skip, stop, queue, nowplaying, pause, resume };
+

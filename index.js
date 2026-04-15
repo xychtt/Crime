@@ -1,6 +1,7 @@
 const { Client, GatewayIntentBits, Collection, Partials } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const { initMusic } = require('./src/utils/musicManager');
 require('dotenv').config();
 
 const client = new Client({
@@ -18,6 +19,7 @@ const client = new Client({
 client.commands = new Collection();
 client.cooldowns = new Collection();
 client.musicQueues = new Map();
+initMusic(client);
 
 function findProjectRoot(startDir, maxDepth = 4) {
   const queue = [{ dir: startDir, depth: 0 }];
