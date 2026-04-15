@@ -1,12 +1,14 @@
-const { DisTube } = require('distube');
-const { SpotifyPlugin } = require('@distube/spotify');
-const { YouTubePlugin } = require('@distube/youtube');
 const ffmpegPath = require('ffmpeg-static');
+const { Blob, File } = require('buffer');
 const { crimeEmbed, errorEmbed } = require('./embed');
 
 function initMusic(client) {
   if (client.distube) return client.distube;
   if (ffmpegPath) process.env.FFMPEG_PATH = ffmpegPath;
+  ensureWebApiPolyfills();
+  const { DisTube } = require('distube');
+  const { SpotifyPlugin } = require('@distube/spotify');
+  const { YouTubePlugin } = require('@distube/youtube');
 
   client.distube = new DisTube(client, {
     emitNewSongOnly: true,
@@ -70,6 +72,27 @@ function initMusic(client) {
     });
 
   return client.distube;
+}
+
+function ensureWebApiPolyfills() {
+  if (typeof globalThis.Blob === 'undefined' && Blob) {
+    globalThis.Blob = Blob;
+  }
+
+  if (typeof globalThis.File === 'undefined') {
+    if (File) {
+      globalThis.File = File;
+    } else {
+      // Minimal fallback for environments where buffer.File is unavailable.
+      globalThis.File = class File extends globalThis.Blob {
+        constructor(parts = [], name = 'file', options = {}) {
+          super(parts, options);
+          this.name = String(name);
+          this.lastModified = options.lastModified || Date.now();
+        }
+      };
+    }
+  }
 }
 
 module.exports = { initMusic };
