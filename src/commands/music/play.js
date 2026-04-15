@@ -18,14 +18,10 @@ module.exports = {
   category: 'music',
   cooldown: 3,
   async execute(message, args, client) {
-    if (!args.length) {
-      return message.reply({ embeds: [errorEmbed('Please provide a song name or URL.')] });
-    }
+    if (!args.length) return message.reply({ embeds: [errorEmbed('Please provide a song name or URL.')] });
 
     const voiceChannel = message.member.voice.channel;
-    if (!voiceChannel) {
-      return message.reply({ embeds: [errorEmbed('You need to be in a voice channel.')] });
-    }
+    if (!voiceChannel) return message.reply({ embeds: [errorEmbed('You need to be in a voice channel.')] });
 
     const permissions = voiceChannel.permissionsFor(message.guild.members.me);
     if (!permissions?.has('Connect') || !permissions?.has('Speak')) {
@@ -33,23 +29,17 @@ module.exports = {
     }
 
     const query = args.join(' ');
-    const statusMsg = await message.reply({
-      embeds: [crimeEmbed({ description: `Searching for **${query}**...` })],
-    });
+    const statusMsg = await message.reply({ embeds: [crimeEmbed({ description: `Searching for **${query}**...` })] });
 
     try {
       const track = await resolveTrack(query, message.author.tag);
-      if (!track) {
-        await statusMsg.edit({ embeds: [errorEmbed('No results found for that query.')] });
-        return;
-      }
+      if (!track) return statusMsg.edit({ embeds: [errorEmbed('No results found for that query.')] });
 
-      const guildId = message.guild.id;
-      const queue = ensureQueue(client, guildId, message, voiceChannel);
+      const queue = ensureQueue(client, message.guild.id, message, voiceChannel);
       queue.queue.push(track);
 
       if (queue.playing) {
-        await statusMsg.edit({
+        return statusMsg.edit({
           embeds: [crimeEmbed({
             title: 'Added to Queue',
             description: `**[${track.title}](${track.url})**`,
@@ -60,7 +50,6 @@ module.exports = {
             ],
           })],
         });
-        return;
       }
 
       queue.playing = true;
@@ -68,7 +57,7 @@ module.exports = {
     } catch (err) {
       console.error('Play command error:', err);
       await statusMsg.edit({
-        embeds: [errorEmbed('Could not start playback. Try another song or URL.')],
+        embeds: [errorEmbed(`Could not start playback. ${err?.message || 'Unknown error'}`)],
       }).catch(() => {});
     }
   },
@@ -78,13 +67,10 @@ function ensureQueue(client, guildId, message, voiceChannel) {
   if (!client.musicQueues.has(guildId)) {
     client.musicQueues.set(guildId, {
       connection: null,
-      player: createAudioPlayer({
-        behaviors: { noSubscriber: NoSubscriberBehavior.Play },
-      }),
+      player: createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } }),
       queue: [],
       playing: false,
       textChannelId: message.channel.id,
-      initialized: false,
     });
   }
 
@@ -95,7 +81,6 @@ function ensureQueue(client, guildId, message, voiceChannel) {
   if (queue.connection && currentChannelId && currentChannelId !== voiceChannel.id) {
     queue.connection.destroy();
     queue.connection = null;
-    queue.initialized = false;
   }
 
   if (!queue.connection) {
@@ -107,37 +92,7 @@ function ensureQueue(client, guildId, message, voiceChannel) {
     });
   }
 
-  if (!queue.initialized) {
-    const sub = queue.connection.subscribe(queue.player);
-    if (!sub) {
-      throw new Error('Failed to subscribe audio player to voice connection.');
-    }
-    queue.initialized = true;
-  }
-
   return queue;
-}
-
-async function resolveTrack(query, requestedBy) {
-  // Spotify links are resolved to an equivalent YouTube audio source.
-  if (isSpotifyUrl(query)) {
-    return resolveSpotifyTrack(query, requestedBy);
-  }
-
-  const ytSource = await resolveYouTubeSource(query);
-  if (!ytSource) return null;
-
-  const info = await play.video_info(ytSource);
-  const details = info.video_details;
-  return {
-    url: ytSource,
-    playbackUrl: ytSource,
-    title: details?.title || 'Unknown title',
-    duration: details?.durationRaw || 'Unknown',
-    thumbnail: details?.thumbnails?.[0]?.url,
-    source: 'YouTube',
-    requestedBy,
-  };
 }
 
 function isSpotifyUrl(query) {
@@ -147,39 +102,30 @@ function isSpotifyUrl(query) {
 async function resolveYouTubeSource(query) {
   if (play.yt_validate(query) === 'video') return query;
   const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
-  if (!results?.length) return null;
-  return results[0].url;
+  return results?.[0]?.url || null;
 }
 
 async function resolveSpotifyTrack(spotifyUrl, requestedBy) {
   let searchText = null;
-
-  // Try play-dl Spotify metadata first.
   try {
     const spType = play.sp_validate(spotifyUrl);
     const sp = await play.spotify(spotifyUrl);
     if (sp?.fetch) await sp.fetch();
 
     if (spType === 'track') {
-      const artist = sp?.artists?.[0]?.name || '';
-      searchText = `${sp.name || ''} ${artist}`.trim();
+      searchText = `${sp?.name || ''} ${sp?.artists?.[0]?.name || ''}`.trim();
     } else if ((spType === 'playlist' || spType === 'album') && sp?.all_tracks) {
       const tracks = await sp.all_tracks();
       const first = tracks?.[0];
-      if (first) {
-        const artist = first?.artists?.[0]?.name || '';
-        searchText = `${first.name || ''} ${artist}`.trim();
-      }
+      if (first) searchText = `${first?.name || ''} ${first?.artists?.[0]?.name || ''}`.trim();
     }
   } catch {
-    // Fall through to oEmbed fallback
+    // fallback below
   }
 
-  // Fallback: Spotify oEmbed (no auth), useful if play-dl Spotify metadata fails.
   if (!searchText) {
     try {
-      const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`;
-      const res = await fetch(oembedUrl);
+      const res = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`);
       if (res.ok) {
         const data = await res.json();
         searchText = `${data?.title || ''} ${data?.author_name || ''}`.trim();
@@ -190,20 +136,37 @@ async function resolveSpotifyTrack(spotifyUrl, requestedBy) {
   }
 
   if (!searchText) return null;
+  const yt = await resolveYouTubeSource(`${searchText} official audio`);
+  if (!yt) return null;
 
-  const ytSource = await resolveYouTubeSource(`${searchText} official audio`);
-  if (!ytSource) return null;
-
-  const info = await play.video_info(ytSource);
-  const details = info.video_details;
-
+  const info = await play.video_info(yt);
+  const d = info.video_details;
   return {
     url: spotifyUrl,
-    playbackUrl: ytSource,
-    title: details?.title || searchText,
-    duration: details?.durationRaw || 'Unknown',
-    thumbnail: details?.thumbnails?.[0]?.url,
+    playbackUrl: yt,
+    title: d?.title || searchText,
+    duration: d?.durationRaw || 'Unknown',
+    thumbnail: d?.thumbnails?.[0]?.url,
     source: 'Spotify -> YouTube',
+    requestedBy,
+  };
+}
+
+async function resolveTrack(query, requestedBy) {
+  if (isSpotifyUrl(query)) return resolveSpotifyTrack(query, requestedBy);
+
+  const yt = await resolveYouTubeSource(query);
+  if (!yt) return null;
+
+  const info = await play.video_info(yt);
+  const d = info.video_details;
+  return {
+    url: yt,
+    playbackUrl: yt,
+    title: d?.title || 'Unknown title',
+    duration: d?.durationRaw || 'Unknown',
+    thumbnail: d?.thumbnails?.[0]?.url,
+    source: 'YouTube',
     requestedBy,
   };
 }
@@ -221,32 +184,29 @@ async function playNext(queue, message, client, statusMsg = null) {
 
   try {
     await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
-  } catch {
+    const sub = queue.connection.subscribe(queue.player);
+    if (!sub) throw new Error('Could not subscribe audio player to voice connection.');
+  } catch (err) {
     queue.connection?.destroy();
     queue.playing = false;
     client.musicQueues.delete(guildId);
-    await message.channel.send({ embeds: [errorEmbed('Voice connection timed out. Try `!play` again.')] }).catch(() => {});
+    await message.channel.send({ embeds: [errorEmbed(`Voice join failed: ${err?.message || 'timeout'}`)] }).catch(() => {});
     return;
   }
 
   try {
-    // Stage channels can keep bots suppressed, causing "playing" but no audible output.
     const me = message.guild.members.me;
     if (me?.voice?.channel?.isStageChannel?.() && me.voice.suppress) {
       await me.voice.setSuppressed(false).catch(() => {});
       await me.voice.setRequestToSpeak(true).catch(() => {});
     }
 
-    const streamUrl = track.playbackUrl || track.url;
-    const stream = await play.stream(streamUrl, { discordPlayerCompatibility: true });
+    const stream = await play.stream(track.playbackUrl || track.url, { discordPlayerCompatibility: true });
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     queue.player.play(resource);
     await entersState(queue.player, AudioPlayerStatus.Playing, 15_000);
 
-    // Re-subscribe defensively in case connection changed states.
-    queue.connection.subscribe(queue.player);
-
-    const nowPlaying = crimeEmbed({
+    const embed = crimeEmbed({
       title: 'Now Playing',
       description: `**[${track.title}](${track.url})**`,
       thumbnail: track.thumbnail,
@@ -257,21 +217,17 @@ async function playNext(queue, message, client, statusMsg = null) {
       ],
     });
 
-    if (statusMsg) await statusMsg.edit({ embeds: [nowPlaying] }).catch(() => {});
-    else await message.channel.send({ embeds: [nowPlaying] }).catch(() => {});
+    if (statusMsg) await statusMsg.edit({ embeds: [embed] }).catch(() => {});
+    else await message.channel.send({ embeds: [embed] }).catch(() => {});
 
     queue.player.once(AudioPlayerStatus.Idle, () => {
-      playNext(queue, message, client).catch(err => console.error('playNext idle error:', err));
+      playNext(queue, message, client).catch(e => console.error('Idle next error:', e));
     });
     queue.player.once('error', (err) => {
-      console.error('Player error:', err);
-      message.channel.send({
-        embeds: [errorEmbed(`Player error on **${track.title}**: ${err?.message || 'Unknown error'}`)],
-      }).catch(() => {});
-      playNext(queue, message, client).catch(nextErr => console.error('playNext recover error:', nextErr));
+      message.channel.send({ embeds: [errorEmbed(`Player error: ${err?.message || 'unknown'}`)] }).catch(() => {});
+      playNext(queue, message, client).catch(e => console.error('Recover next error:', e));
     });
   } catch (err) {
-    console.error('Track playback error:', err);
     await message.channel.send({
       embeds: [errorEmbed(`Failed to play **${track.title}**. ${err?.message || 'Unknown error'} Skipping...`)],
     }).catch(() => {});
@@ -280,3 +236,4 @@ async function playNext(queue, message, client, statusMsg = null) {
 }
 
 module.exports.playNext = playNext;
+
