@@ -9,6 +9,8 @@ const {
 } = require('@discordjs/voice');
 const play = require('play-dl');
 const { crimeEmbed, errorEmbed } = require('../../utils/embed');
+const LOOKUP_TIMEOUT_MS = 12000;
+const STREAM_TIMEOUT_MS = 20000;
 
 module.exports = {
   name: 'play',
@@ -102,7 +104,11 @@ function isSpotifyUrl(query) {
 
 async function resolveYouTubeSource(query) {
   if (play.yt_validate(query) === 'video') return query;
-  const results = await play.search(query, { limit: 1, source: { youtube: 'video' } });
+  const results = await withTimeout(
+    play.search(query, { limit: 1, source: { youtube: 'video' } }),
+    LOOKUP_TIMEOUT_MS,
+    'YouTube search timed out'
+  );
   return results?.[0]?.url || null;
 }
 
@@ -110,13 +116,13 @@ async function resolveSpotifyTrack(spotifyUrl, requestedBy) {
   let searchText = null;
   try {
     const spType = play.sp_validate(spotifyUrl);
-    const sp = await play.spotify(spotifyUrl);
-    if (sp?.fetch) await sp.fetch();
+    const sp = await withTimeout(play.spotify(spotifyUrl), LOOKUP_TIMEOUT_MS, 'Spotify lookup timed out');
+    if (sp?.fetch) await withTimeout(sp.fetch(), LOOKUP_TIMEOUT_MS, 'Spotify fetch timed out');
 
     if (spType === 'track') {
       searchText = `${sp?.name || ''} ${sp?.artists?.[0]?.name || ''}`.trim();
     } else if ((spType === 'playlist' || spType === 'album') && sp?.all_tracks) {
-      const tracks = await sp.all_tracks();
+      const tracks = await withTimeout(sp.all_tracks(), LOOKUP_TIMEOUT_MS, 'Spotify track list timed out');
       const first = tracks?.[0];
       if (first) searchText = `${first?.name || ''} ${first?.artists?.[0]?.name || ''}`.trim();
     }
@@ -126,9 +132,13 @@ async function resolveSpotifyTrack(spotifyUrl, requestedBy) {
 
   if (!searchText) {
     try {
-      const res = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`);
+      const res = await withTimeout(
+        fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(spotifyUrl)}`),
+        LOOKUP_TIMEOUT_MS,
+        'Spotify oEmbed timed out'
+      );
       if (res.ok) {
-        const data = await res.json();
+        const data = await withTimeout(res.json(), 5000, 'Spotify oEmbed parse timed out');
         searchText = `${data?.title || ''} ${data?.author_name || ''}`.trim();
       }
     } catch {
@@ -140,8 +150,13 @@ async function resolveSpotifyTrack(spotifyUrl, requestedBy) {
   const yt = await resolveYouTubeSource(`${searchText} official audio`);
   if (!yt) return null;
 
-  const info = await play.video_info(yt);
-  const d = info.video_details;
+  let d = null;
+  try {
+    const info = await withTimeout(play.video_info(yt), LOOKUP_TIMEOUT_MS, 'YouTube metadata timed out');
+    d = info.video_details;
+  } catch {
+    d = null;
+  }
   return {
     url: spotifyUrl,
     playbackUrl: yt,
@@ -159,12 +174,17 @@ async function resolveTrack(query, requestedBy) {
   const yt = await resolveYouTubeSource(query);
   if (!yt) return null;
 
-  const info = await play.video_info(yt);
-  const d = info.video_details;
+  let d = null;
+  try {
+    const info = await withTimeout(play.video_info(yt), LOOKUP_TIMEOUT_MS, 'YouTube metadata timed out');
+    d = info.video_details;
+  } catch {
+    d = null;
+  }
   return {
     url: yt,
     playbackUrl: yt,
-    title: d?.title || 'Unknown title',
+    title: d?.title || guessTitleFromQuery(query),
     duration: d?.durationRaw || 'Unknown',
     thumbnail: d?.thumbnails?.[0]?.url,
     source: 'YouTube',
@@ -201,7 +221,11 @@ async function playNext(queue, message, client, statusMsg = null) {
       await me.voice.setRequestToSpeak(true).catch(() => {});
     }
 
-    const stream = await play.stream(track.playbackUrl || track.url, { discordPlayerCompatibility: true });
+    const stream = await withTimeout(
+      play.stream(track.playbackUrl || track.url, { discordPlayerCompatibility: true }),
+      STREAM_TIMEOUT_MS,
+      'Audio stream timed out'
+    );
     const resource = createAudioResource(stream.stream, { inputType: stream.type });
     queue.player.play(resource);
     await entersState(queue.player, AudioPlayerStatus.Playing, 15_000);
@@ -236,3 +260,16 @@ async function playNext(queue, message, client, statusMsg = null) {
 }
 
 module.exports.playNext = playNext;
+
+function withTimeout(promise, ms, message = 'Operation timed out') {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+function guessTitleFromQuery(query) {
+  if (typeof query !== 'string') return 'Unknown title';
+  return query.length > 90 ? `${query.slice(0, 87)}...` : query;
+}
